@@ -17,11 +17,11 @@ struct bblk {
     char mem[PAGESIZE - (sizeof(size_t) + sizeof(bb) + sizeof(size_t))];
 } __attribute__((packed));
 
-typedef struct smmblk memblock;
-typedef memblock* mb;
-struct smmblk {
-    mb prev;
-    mb next;
+typedef struct sblk sblock;
+typedef sblock* sb;
+struct sblk {
+    sb prev;
+    sb next;
     void* end;
     bb bblk;
     bool free;
@@ -51,7 +51,7 @@ bb bbinit() {
     out->next = NULL;
     out->occ = 0;
 
-    mb t = (mb) out->mem;
+    sb t = (sb) out->mem;
     /* The internal small block has no predecessors or
      * successors, but spans the full block width */
     t->prev = NULL;
@@ -70,45 +70,45 @@ bb bbinit() {
  * @return void* to memory, or NULL if no space was found.
  */
 static void* bblkalloc(bb blk, size_t size) {
-    mb sb = (mb) blk->mem;
+    sb currSB = (sb) blk->mem;
     /* Find the first free small block */
     while (1) {
-        if (sb->free) break;
+        if (currSB->free) break;
         tryGetNext:;
-        if (sb->next == NULL) {
+        if (currSB->next == NULL) {
             /* Reached end of big block */
             return NULL;
         }
-        sb = sb->next;
+        currSB = currSB->next;
     }
 
     /* Remaining space in small block */
-    size_t frsize = sb->end - (((void*)sb) + sizeof(memblock));
+    size_t frsize = currSB->end - (((void*)currSB) + sizeof(sblock));
 
     /* If there isn't enough space to fit a new small block
      * find another block that will fit one */
-    if (frsize < (size + sizeof(memblock))) {
+    if (frsize < (size + sizeof(sblock))) {
         goto tryGetNext;
     }
 
     /* Initialize the new small block by stealing
      * space from the end of the 'current' small block */
-    mb nsb = sb->end - (sizeof(memblock) + size);
-    nsb->prev = sb;
-    nsb->next = sb->next;
-    nsb->end = sb->end;
-    nsb->free = false;
-    nsb->bblk = blk;
+    sb newSB = currSB->end - (sizeof(sblock) + size);
+    newSB->prev = currSB;
+    newSB->next = currSB->next;
+    newSB->end = currSB->end;
+    newSB->free = false;
+    newSB->bblk = blk;
 
     /* Append new small block to list */
-    sb->end = nsb;
-    if (sb->next != NULL) sb->next->prev = nsb;
-    sb->next = nsb;
+    currSB->end = newSB;
+    if (currSB->next != NULL) currSB->next->prev = newSB;
+    currSB->next = newSB;
 
-    sb->bblk = blk;
+    currSB->bblk = blk;
     blk->occ++;
     /* Return pointer past allocation header */
-    return ((void*)nsb) + sizeof(memblock);
+    return ((void*)newSB) + sizeof(sblock);
 }
 
 /**
@@ -155,31 +155,31 @@ void* lalloc(size_t size) {
  */
 void lfree(void* a) {
     /* Decrement pointer to get to begining of header */
-    mb sb = a - sizeof(memblock);
-    sb->free = true;
+    sb currSB = a - sizeof(sblock);
+    currSB->free = true;
 
-    if (sb->prev != NULL && sb->prev->free) {
+    if (currSB->prev != NULL && currSB->prev->free) {
         /* If previous block exists and is free, extend it
          * to wrap over this one and remove pointers to
          * this block header */
-        sb->prev->end = sb->end;
-        sb->prev->next = sb->next;
-        if (sb->next != NULL) sb->next->prev = sb->prev;
+        currSB->prev->end = currSB->end;
+        currSB->prev->next = currSB->next;
+        if (currSB->next != NULL) currSB->next->prev = currSB->prev;
 
         /* Replace block pointer on stack */
-        sb = sb->prev;
+        currSB = currSB->prev;
     }
 
-    if (sb->next != NULL && sb->next->free) {
+    if (currSB->next != NULL && currSB->next->free) {
         /* If next block exists extend current one over
          * it and scrub pointers to it */
-        sb->end = sb->next->end;
-        sb->next = sb->next->next;
-        if (sb->next != NULL) sb->next->prev = sb;
+        currSB->end = currSB->next->end;
+        currSB->next = currSB->next->next;
+        if (currSB->next != NULL) currSB->next->prev = currSB;
     }
 
     /* Decrement occupancy */
-    sb->bblk->occ--;
+    currSB->bblk->occ--;
 }
 
 #endif
