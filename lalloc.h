@@ -34,7 +34,7 @@ bb first;
 /**
  * @author Lev Knoblock
  * @notice Allocates a 'big block' of memory using mmap and inserts 1 'small block' into it
- * @dev Consider moving away from 1 page of memory. Maybe larger blocks would be better.
+ * @dev Currently using 1 MB 'big blocks'. Consider what size would be optimum.
  * @param
  * @return bblk *
  */
